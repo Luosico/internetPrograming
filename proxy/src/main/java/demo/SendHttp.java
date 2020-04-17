@@ -34,15 +34,6 @@ public class SendHttp {
 
         StringBuilder stringBuilder = new StringBuilder();
         String line ;
-        /*while((line = reader.readLine())!=null){
-            if (reader.ready()){
-                stringBuilder.append(line);
-                System.out.println(line);
-            }
-            else{
-                System.out.println("暂时没有数据");
-            }
-        }*/
-        //System.out.println(stringBuilder);
+        
     }
 }
