@@ -1,13 +1,23 @@
 package httpProxy;
 
+import java.util.Arrays;
+
 /**
  * @Author: luo kai fa
  * @Date: 2020/4/17
  */
 public class RequestInfo {
     String host;
+    String method;
     int port;
-    byte[] content;
+
+    public String getMethod() {
+        return method;
+    }
+
+    public void setMethod(String method) {
+        this.method = method;
+    }
 
     public int getPort() {
         return port;
@@ -17,13 +27,6 @@ public class RequestInfo {
         this.port = port;
     }
 
-    public byte[] getContent() {
-        return content;
-    }
-
-    public void setContent(byte[] content) {
-        this.content = content;
-    }
 
     public RequestInfo() {
         this.host = null;

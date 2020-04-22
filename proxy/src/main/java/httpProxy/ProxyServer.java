@@ -1,14 +1,11 @@
 package httpProxy;
 
 import java.io.*;
-
-import java.net.InetSocketAddress;
+import java.net.ConnectException;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.net.SocketException;
+import java.util.Scanner;
 
 /**
  * @Author: luo kai fa
@@ -34,18 +31,12 @@ public class ProxyServer {
         Socket socket;
         try {
             while ((socket = serverSocket.accept()) != null) {
+                System.out.println("一个新的连接：");
                 Socket finalSocket = socket;
-                System.out.println(socket);
+                System.out.println(">>>clientSocket:" + socket + "<<<");
                 Runnable r = () -> {
-                    System.out.println("一个新的连接：");
-                    parseSocket(finalSocket);
+                    executeProxy(finalSocket);
 
-                    /*//关闭socket
-                    try {
-                        finalSocket.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }*/
                 };
                 //启动线程
                 new Thread(r).start();
@@ -55,140 +46,118 @@ public class ProxyServer {
         }
     }
 
-    //解析http报文，根据Host建立与URL的连接
-    public void parseSocket(Socket socket) {
-        //String host = null;
-
-        //线程：解析出http报文的host
-        Runnable r = () -> {
-            RequestInfo requestInfo = new RequestInfo();
-            try {
-                BufferedInputStream bufferedInputStream = new BufferedInputStream(socket.getInputStream());
-                //注意长度
-                byte[] temp = new byte[200];
-                int len;
-                int symbol = 0;
-                Socket proxySocket = null;
-
-                //由于HTTP1.1协议，将会保持长连接
-                while ((len = bufferedInputStream.read(temp)) != -1) {
-                    byte[] temps = Arrays.copyOf(temp, len);
-                   //System.out.println("server接收client数据");
-                    //System.out.println(new String(temps));
-
-                    //获取Host的值
-                    if (requestInfo.getHost() == null) {
-                        //System.out.println("获取Host");
-                        requestInfo.setContent(temps);
-
-                        String s = new String(temps, StandardCharsets.UTF_8);
-                        String patternString = "Host: .*?\r\n";
-                        Pattern pattern = Pattern.compile(patternString);
-                        Matcher matcher = pattern.matcher(s);
-                        if (matcher.find()) {
-                            String result = matcher.group();
-                            String host = result.split(":")[1].trim();
-
-                            //HTTP缺省为80端口，HTTPS缺省为443端口
-                            requestInfo.setPort(80);
-                            if(result.split(":").length==3)
-                                requestInfo.setPort(Integer.parseInt(result.split(":")[2].trim()));
-
-                            System.out.println("-----------Host:"+host+"----------------");
-                            //将Host的值添加到requestInfo
-                            requestInfo.setHost(host);
-                        }
-                    //向remote发送数据
-                    } else {
-                        System.out.println("Host已获取");
-
-                        //与remote建立socket连接
-                        if (symbol == 0) {
-                            proxySocket = new Socket();
-                            proxySocket.connect(new InetSocketAddress(requestInfo.getHost(), requestInfo.getPort()));
-                            //proxySocket.setSoTimeout(5000);
-                            System.out.println("与remote建立连接");
-                            System.out.println(proxySocket);
-
-                            BufferedInputStream proxyInput = new BufferedInputStream(proxySocket.getInputStream());
-
-                            //线程：用于接收remote的数据
-                            Runnable rr = () -> {
-                                byte[] remoteMessage = new byte[1024];
-                                int length;
-                                try {
-                                    while ((length = proxyInput.read(remoteMessage)) != -1) {
-                                        //System.out.println("server接收remote数据");
-                                        BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(socket.getOutputStream());
-                                        //传回数据给client
-                                        bufferedOutputStream.write(Arrays.copyOf(remoteMessage,length));
-                                        bufferedOutputStream.flush();
-                                    }
-                                } catch (IOException e) {
-                                    e.printStackTrace();
-                                }
-                            };
-                            new Thread(rr).start();
-
-                            //表示socket连接已经建立
-                            symbol = 1;
-                        }
-                        //System.out.println(proxySocket);
-                        BufferedOutputStream proxyOutput = new BufferedOutputStream(proxySocket.getOutputStream());
-
-                        //向remote发送数据
-                        if (requestInfo.getContent() != null) {
-                            proxyOutput.write(requestInfo.getContent());
-                            requestInfo.setContent(null);
-                        }
-                        proxyOutput.write(temps);
-                        proxyOutput.flush();
-
-
-                    }
-
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        };
-        //启动线程
-        new Thread(r).start();
-    }
-
-    //代理服务器处理数据交换
-    public void proxyMessage(HttpMessage httpMessage, Socket clientSocket) {
+    public void executeProxy(Socket socket) {
+        RequestInfo requestInfo = new RequestInfo();
+        InputStream clientIn = null;
+        OutputStream clientOut = null;
         try {
-            //与目标URL建立连接
-            Socket socket = new Socket();
-            socket.connect(new InetSocketAddress(httpMessage.host, 80), 5000); //设置连接超时时间
-            //设置读超时时间
-            //socket.setSoTimeout(10000);
+            clientIn = socket.getInputStream();
+            clientOut = socket.getOutputStream();
 
-            //传输http报文
-            BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(socket.getOutputStream());
-            bufferedOutputStream.write(httpMessage.content.getBytes());
-            bufferedOutputStream.flush();
-
-            BufferedInputStream bufferedInputStream = new BufferedInputStream(socket.getInputStream());
-            //返回的http报文
-            byte[] message = new byte[1024];
-            int len;
-
-            //client的输入流
-            BufferedOutputStream clientOutputStream = new BufferedOutputStream(clientSocket.getOutputStream());
-
-            //将返回的http报文传给client
-            while ((len = bufferedInputStream.read(message)) != -1) {
-                clientOutputStream.write(Arrays.copyOf(message, len));
-            }
-            clientOutputStream.flush();
-
-        } catch (InterruptedIOException e) {
-            System.out.println(httpMessage.host + "超时");
         } catch (IOException e) {
             e.printStackTrace();
         }
+        Scanner scanner = new Scanner(clientIn);
+        String line;
+
+        int symbol = 0;
+        StringBuilder stringBuilder = new StringBuilder();
+        while ((line = scanner.nextLine()) != null) {
+            //System.out.println("---------length = "+ line.length());
+            //阻塞 退出
+            if (line.length() == 0)
+                break;
+
+            stringBuilder.append(line).append("\r\n");
+
+            //请求行
+            if (symbol == 0) {
+                //请求方法为CONNECT，为HTTPS
+                if (line.startsWith("CONNECT")) {
+                    requestInfo.setMethod("CONNECT");
+                    requestInfo.setPort(443);
+                } else {//HTTP请求
+                    requestInfo.setMethod("other");
+                    requestInfo.setPort(80);
+                }
+                symbol = 1;
+            } else {
+                //找出 Host,port
+                if (line.startsWith("Host")) {
+                    String[] s = line.split(":");
+                    if (s.length == 3) {
+                        requestInfo.setPort(Integer.parseInt(s[2]));
+                    }
+                    requestInfo.setHost(s[1].trim());
+                }
+            }
+
+        }
+        stringBuilder.append("\r\n");
+
+        //System.out.println(">>>>Host: " + requestInfo.getHost() + "<<<");
+        //System.out.println(">>>Port: " + requestInfo.getPort() + "<<<");
+        //System.out.println(">>>Method: " + requestInfo.getMethod() + "<<<");
+        System.out.println(stringBuilder);
+
+        Socket remoteSocket = null;
+        OutputStream remoteOut = null;
+        InputStream remoteIn = null;
+        try {
+            //与remote建立socket连接
+            remoteSocket = new Socket(requestInfo.getHost(), requestInfo.getPort());
+            remoteOut = remoteSocket.getOutputStream();
+            remoteIn = remoteSocket.getInputStream();
+
+            System.out.println(">>>remoteSocket: " + remoteSocket + "<<<");
+        } catch (ConnectException connectException) {
+            System.out.println("-------与remote连接中断------------");
+            try {
+                socket.close();
+                //clientIn.close();
+                //clientOut.close();
+                //remoteIn.close();
+                //remoteOut.close();
+            } catch (IOException e) {
+                System.out.println("异常：remoteSocket关闭");
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        try {
+            if ( clientOut != null){
+                //HTTPS，不转发请求头
+                if (requestInfo.getMethod().equals("CONNECT")) {
+                    String success = "HTTP/1.1 200 Connection Established\r\n\r\n";
+                    clientOut.write(success.getBytes());
+                    clientOut.flush();
+
+
+                } else { //HTTP请求将请求头转发
+                    remoteOut.write(stringBuilder.toString().getBytes());
+                    remoteOut.flush();
+                }
+            }
+
+            //client -> remote
+            ProxyThread thread1 = new ProxyThread(remoteOut, clientIn);
+            //remote -> client
+            ProxyThread thread2 = new ProxyThread(clientOut, remoteIn);
+
+            Thread t1 = new Thread(thread1);
+            Thread t2 = new Thread(thread2);
+            t1.start();
+            t2.start();
+
+
+        } catch (SocketException socketException) {
+            System.out.println("异常：Socket已关闭");
+        } catch (IOException  e) {
+            e.printStackTrace();
+        }
+
+
     }
 
     public static void main(String[] args) {
